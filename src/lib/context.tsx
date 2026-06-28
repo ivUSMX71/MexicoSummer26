@@ -15,7 +15,75 @@ const ThemeContext = createContext<ThemeCtx | null>(null);
 
 export type Lang = "es" | "en";
 
-const STRINGS = {
+export interface Strings {
+  appName: string;
+  tagline: string;
+  prepaid: string;
+  postpaid: string;
+  plans: string;
+  filters: string;
+  sortBy: string;
+  sort_price_asc: string;
+  sort_data_desc: string;
+  sort_apps_desc: string;
+  sort_value: string;
+  operator: string;
+  network: string;
+  simType: string;
+  allSims: string;
+  esim: string;
+  physical: string;
+  bothSim: string;
+  acquisition: string;
+  acq_any: string;
+  acq_recarga: string;
+  acq_porta: string;
+  validity: string;
+  val_any: string;
+  val_weekly: string;
+  val_monthly: string;
+  val_bimonthly: string;
+  val_semester: string;
+  val_annual: string;
+  dataRange: string;
+  data_any: string;
+  data_unlimited: string;
+  budget: string;
+  enable: string;
+  autopay: string;
+  requiredApps: string;
+  show: string;
+  hide: string;
+  clearFilters: string;
+  noResults: string;
+  bestValueTitle: string;
+  bestValueDesc: (carrier: string, name: string, gb: string, price: number) => string;
+  data: string;
+  libres: string;
+  perGB: string;
+  perDay: string;
+  callsSms: string;
+  unlimited: string;
+  unlimitedBoth: string;
+  unlimitedApps: string;
+  socialData: string;
+  videoData: string;
+  hotspot: string;
+  hotspotYes: string;
+  includes: string;
+  autopayPrice: string;
+  porta: string;
+  perValidity: (d: number) => string;
+  footer: string;
+  postTitle: string;
+  postSoon: string;
+  postDesc: string;
+  notifyMe: string;
+  notifyOk: string;
+  emailPlaceholder: string;
+}
+
+const STRINGS: Record<Lang, Strings> = {
   es: {
     appName: "Planes MX",
     tagline: "Comparador de planes prepago en México",
@@ -158,9 +226,7 @@ const STRINGS = {
     notifyOk: "Thanks! We'll let you know when it's ready.",
     emailPlaceholder: "you@email.com",
   },
-} as const;
-
-export type Strings = (typeof STRINGS)["es"];
+};
 
 interface LangCtx {
   lang: Lang;
