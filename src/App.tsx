@@ -81,7 +81,7 @@ export default function App() {
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             <Signal size={18} className="text-cyan-400" />
-            <span className="text-base font-bold text-cyan-400 tracking-tight">Compara MX</span>
+            <span className="text-base font-bold text-cyan-400 tracking-tight">Mexico Planes</span>
           </div>
           <div className="flex items-center gap-3">
             {tab === "prepaid" && (
