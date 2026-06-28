@@ -4,108 +4,158 @@ import type { FilterState, SortKey } from "./components/Filters";
 import FilterPanel from "./components/Filters";
 import PlanCard from "./components/PlanCard";
 import PostpaidSection from "./components/PostpaidSection";
-import { Signal, Zap } from "lucide-react";
-import { getCarrier, formatData, mxnPerGB } from "./data/utils";
+import { useLang, useTheme } from "./lib/context";
+import {
+  getCarrier,
+  formatData,
+  mxnPerGB,
+  validityCategory,
+  dataRangeOf,
+  effectivePrice,
+} from "./data/utils";
+import { Signal, Zap, Sun, Moon } from "lucide-react";
 
 const emptyFilters: FilterState = {
   networks: new Set(),
   carriers: new Set(),
   maxPrice: null,
-  simFilter: "all",
-  requiredApps: new Set(),
-  portabilidadOnly: false,
   budgetActive: false,
+  simFilter: "all",
+  acquisition: "all",
+  validity: new Set(),
+  dataRanges: new Set(),
+  requiredApps: new Set(),
 };
 
 type Tab = "prepaid" | "postpaid";
 
 export default function App() {
+  const { t, lang, setLang } = useLang();
+  const { mode, toggle } = useTheme();
   const [tab, setTab] = useState<Tab>("prepaid");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [sort, setSort] = useState<SortKey>("price_asc");
+  const [autopay, setAutopay] = useState(false);
+
+  const prepaidPlans = useMemo(() => plans.filter((p) => p.planType === "prepaid"), []);
 
   const filtered = useMemo(() => {
-    let result = plans.filter((p) => {
-      if (p.planType !== "prepaid") return false;
+    let result = prepaidPlans.filter((p) => {
       const carrier = carriers.find((c) => c.id === p.carrierId);
       if (!carrier) return false;
 
       if (filters.networks.size > 0 && !filters.networks.has(carrier.network)) return false;
       if (filters.carriers.size > 0 && !filters.carriers.has(p.carrierId)) return false;
-      if (filters.budgetActive && filters.maxPrice !== null && p.price > filters.maxPrice) return false;
-      if (filters.portabilidadOnly && !p.portabilidad) return false;
+
+      const price = effectivePrice(p, autopay);
+      if (filters.budgetActive && filters.maxPrice !== null && price > filters.maxPrice) return false;
+
       if (filters.simFilter === "esim" && p.simType === "physical") return false;
       if (filters.simFilter === "physical" && p.simType === "esim") return false;
+
+      if (filters.acquisition === "portabilidad" && !p.portabilidad) return false;
+      if (filters.acquisition === "recarga" && /portabilidad/i.test(p.name)) return false;
+
+      if (filters.validity.size > 0 && !filters.validity.has(validityCategory(p.validityDays))) return false;
+      if (filters.dataRanges.size > 0 && !filters.dataRanges.has(dataRangeOf(p))) return false;
+
       if (filters.requiredApps.size > 0) {
         for (const app of filters.requiredApps) {
-          if (!p.unlimitedApps.includes(app)) return false;
+          const has = p.unlimitedApps.includes(app) || p.socialApps?.includes(app) || p.videoApps?.includes(app);
+          if (!has) return false;
         }
       }
       return true;
     });
 
-    result = result.sort((a, b) => {
+    result = [...result].sort((a, b) => {
       switch (sort) {
-        case "price_asc": return a.price - b.price;
+        case "price_asc":
+          return effectivePrice(a, autopay) - effectivePrice(b, autopay);
         case "data_desc": {
           const av = a.dataGB === "unlimited" ? Infinity : a.dataGB;
           const bv = b.dataGB === "unlimited" ? Infinity : b.dataGB;
           return bv - av;
         }
-        case "apps_desc": return b.unlimitedApps.length - a.unlimitedApps.length;
+        case "apps_desc":
+          return b.unlimitedApps.length - a.unlimitedApps.length;
+        case "value": {
+          const av = mxnPerGB(a) ?? -1; // unlimited = best
+          const bv = mxnPerGB(b) ?? -1;
+          return av - bv;
+        }
       }
     });
 
     return result;
-  }, [filters, sort]);
+  }, [prepaidPlans, filters, sort, autopay]);
 
   const reset = () => setFilters(emptyFilters);
 
-  // Best value plan: lowest MXN per GB (normalized to 30 days)
   const bestValue = useMemo(() => {
     if (filtered.length === 0) return null;
     return filtered.reduce((acc, p) => {
-      const av = mxnPerGB(acc) ?? -1; // unlimited → null → -1 (best)
+      const av = mxnPerGB(acc) ?? -1;
       const pv = mxnPerGB(p) ?? -1;
       return pv < av ? p : acc;
     });
   }, [filtered]);
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#0a1628", color: "#e2e8f0" }}>
-      {/* Header */}
-      <header
-        className="sticky top-0 z-20 border-b"
-        style={{ backgroundColor: "#0d1e35", borderColor: "#1e3a5f" }}
-      >
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
+    <div className="min-h-screen" style={{ backgroundColor: "var(--bg)", color: "var(--text)" }}>
+      <header className="sticky top-0 z-20 border-b" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
-            <Signal size={18} className="text-cyan-400" />
-            <span className="text-base font-bold text-cyan-400 tracking-tight">Mexico Planes</span>
+            <Signal size={18} style={{ color: "var(--accent)" }} />
+            <span className="text-base font-extrabold tracking-tight" style={{ color: "var(--accent)" }}>{t.appName}</span>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex items-center gap-2">
             {tab === "prepaid" && (
-              <span className="text-xs font-medium" style={{ color: "#64748b" }}>
-                {filtered.length} planes
+              <span className="hidden sm:inline text-xs font-medium" style={{ color: "var(--text-dim)" }}>
+                {filtered.length} {t.plans}
               </span>
             )}
-            <div
-              className="flex rounded-lg overflow-hidden border text-xs font-medium"
-              style={{ borderColor: "#1e3a5f" }}
+
+            {/* Theme toggle */}
+            <button
+              onClick={toggle}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+              aria-label="Toggle theme"
             >
+              {mode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            {/* Language toggle */}
+            <div className="flex rounded-lg overflow-hidden border text-xs font-bold" style={{ borderColor: "var(--border)" }}>
+              {(["es", "en"] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLang(l)}
+                  className="px-2.5 py-1.5 uppercase transition-colors"
+                  style={lang === l ? { backgroundColor: "var(--accent-soft)", color: "var(--accent)" } : { color: "var(--text-dim)" }}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {/* Prepaid / Postpaid */}
+            <div className="flex rounded-lg overflow-hidden border text-xs font-medium" style={{ borderColor: "var(--border)" }}>
               <button
                 onClick={() => setTab("prepaid")}
                 className="px-3 py-1.5 transition-colors"
-                style={tab === "prepaid" ? { backgroundColor: "#22d3ee22", color: "#22d3ee" } : { color: "#64748b" }}
+                style={tab === "prepaid" ? { backgroundColor: "var(--accent-soft)", color: "var(--accent)" } : { color: "var(--text-dim)" }}
               >
-                Prepago
+                {t.prepaid}
               </button>
               <button
                 onClick={() => setTab("postpaid")}
                 className="px-3 py-1.5 transition-colors"
-                style={tab === "postpaid" ? { backgroundColor: "#22d3ee22", color: "#22d3ee" } : { color: "#64748b" }}
+                style={tab === "postpaid" ? { backgroundColor: "var(--accent-soft)", color: "var(--accent)" } : { color: "var(--text-dim)" }}
               >
-                Pospago
+                {t.postpaid}
               </button>
             </div>
           </div>
@@ -113,61 +163,57 @@ export default function App() {
       </header>
 
       {tab === "prepaid" ? (
-        <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 space-y-5">
+        <main className="mx-auto max-w-6xl px-4 py-4 sm:px-6 space-y-4">
           <FilterPanel
             state={filters}
             sort={sort}
+            autopay={autopay}
             onStateChange={setFilters}
             onSortChange={setSort}
-            allPlans={plans.filter((p) => p.planType === "prepaid")}
+            onAutopayChange={setAutopay}
+            allPlans={prepaidPlans}
           />
 
-          {/* Best value banner */}
           {bestValue && (
-            <div
-              className="flex items-start gap-3 rounded-xl px-4 py-3 border"
-              style={{ backgroundColor: "#0e2a4a", borderColor: "#1e4a7a" }}
-            >
-              <Zap size={16} className="mt-0.5 shrink-0 text-cyan-400" />
+            <div className="flex items-start gap-3 rounded-xl px-4 py-3 border" style={{ backgroundColor: "var(--surface-3)", borderColor: "var(--border)" }}>
+              <Zap size={16} className="mt-0.5 shrink-0" style={{ color: "var(--accent)" }} />
               <div>
-                <p className="text-sm font-semibold text-cyan-400">Mejor valor por tu presupuesto</p>
-                <p className="text-xs mt-0.5" style={{ color: "#94a3b8" }}>
-                  {(() => {
-                    const c = getCarrier(bestValue.carrierId);
-                    const gb = formatData(bestValue.dataGB);
-                    return `${c?.name ?? ""} ${bestValue.name} te da ${gb} por $${bestValue.price} MXN.`;
-                  })()}
+                <p className="text-sm font-bold" style={{ color: "var(--accent)" }}>{t.bestValueTitle}</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  {t.bestValueDesc(
+                    getCarrier(bestValue.carrierId)?.name ?? "",
+                    bestValue.name,
+                    formatData(bestValue.dataGB),
+                    effectivePrice(bestValue, autopay),
+                  )}
                 </p>
               </div>
             </div>
           )}
 
           {filtered.length === 0 ? (
-            <div
-              className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed text-center"
-              style={{ borderColor: "#1e3a5f" }}
-            >
-              <p className="text-sm font-medium" style={{ color: "#64748b" }}>No hay planes que coincidan</p>
-              <button onClick={reset} className="mt-2 text-xs font-medium text-cyan-400 underline">
-                Limpiar filtros
+            <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed text-center" style={{ borderColor: "var(--border)" }}>
+              <p className="text-sm font-medium" style={{ color: "var(--text-dim)" }}>{t.noResults}</p>
+              <button onClick={reset} className="mt-2 text-xs font-medium underline" style={{ color: "var(--accent)" }}>
+                {t.clearFilters}
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((plan) => (
-                <PlanCard key={plan.id} plan={plan} />
+                <PlanCard key={plan.id} plan={plan} autopay={autopay} />
               ))}
             </div>
           )}
         </main>
       ) : (
-        <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6">
+        <main className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
           <PostpaidSection />
         </main>
       )}
 
-      <footer className="border-t mt-8 py-5 text-center text-xs" style={{ borderColor: "#1e3a5f", color: "#475569" }}>
-        Datos recopilados manualmente · Precios en MXN · Verifica disponibilidad con cada compañía
+      <footer className="border-t mt-8 py-5 text-center text-xs" style={{ borderColor: "var(--border)", color: "var(--text-dim)" }}>
+        {t.footer}
       </footer>
     </div>
   );
