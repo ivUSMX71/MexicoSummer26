@@ -1,25 +1,42 @@
 import { useState } from "react";
 import type { Network, UnlimitedApp, Plan } from "../data/types";
 import { ALL_NETWORKS, ALL_APPS, NETWORK_COLORS, carriers } from "../data/types";
-import { ChevronDown, ChevronUp, ArrowLeftRight, Wifi, CreditCard, Smartphone } from "lucide-react";
+import type { ValidityCategory, DataRange } from "../data/utils";
+import { useLang } from "../lib/context";
+import {
+  ChevronDown,
+  ArrowLeftRight,
+  Wifi,
+  CreditCard,
+  Smartphone,
+  Zap,
+  Building2,
+  RadioTower,
+  CalendarRange,
+  Database,
+} from "lucide-react";
 
 export interface FilterState {
   networks: Set<Network>;
   carriers: Set<string>;
   maxPrice: number | null;
-  simFilter: "all" | "esim" | "physical";
-  requiredApps: Set<UnlimitedApp>;
-  portabilidadOnly: boolean;
   budgetActive: boolean;
+  simFilter: "all" | "esim" | "physical";
+  acquisition: "all" | "recarga" | "portabilidad";
+  validity: Set<ValidityCategory>;
+  dataRanges: Set<DataRange | "unlimited">;
+  requiredApps: Set<UnlimitedApp>;
 }
 
-export type SortKey = "price_asc" | "data_desc" | "apps_desc";
+export type SortKey = "price_asc" | "data_desc" | "apps_desc" | "value";
 
 interface Props {
   state: FilterState;
   sort: SortKey;
+  autopay: boolean;
   onStateChange: (s: FilterState) => void;
   onSortChange: (s: SortKey) => void;
+  onAutopayChange: (v: boolean) => void;
   allPlans: Plan[];
 }
 
@@ -27,193 +44,253 @@ function Toggle({ active, onToggle }: { active: boolean; onToggle: () => void })
   return (
     <button
       onClick={onToggle}
-      className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200"
-      style={{ backgroundColor: active ? "#22d3ee" : "#1e3a5f" }}
+      className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200"
+      style={{ backgroundColor: active ? "var(--accent)" : "var(--border)" }}
+      aria-pressed={active}
     >
       <span
-        className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
-        style={{ transform: active ? "translateX(22px)" : "translateX(2px)" }}
+        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
+        style={{ transform: active ? "translateX(19px)" : "translateX(2px)" }}
       />
     </button>
   );
 }
 
-function planCountForNetwork(network: Network, allPlans: Plan[]): number {
-  return allPlans.filter((p) => {
-    const c = carriers.find((c) => c.id === p.carrierId);
-    return c?.network === network;
-  }).length;
+function Section({
+  icon,
+  title,
+  badge,
+  children,
+  defaultOpen = false,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  badge?: number;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-3 py-2.5"
+      >
+        <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+          {icon}
+          {title}
+          {badge ? (
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+              style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}
+            >
+              {badge}
+            </span>
+          ) : null}
+        </span>
+        <ChevronDown size={15} style={{ color: "var(--text-dim)", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
 }
 
-export default function Filters({ state, sort, onStateChange, onSortChange, allPlans }: Props) {
-  const [appsOpen, setAppsOpen] = useState(false);
+function Chip({ active, color, onClick, children }: { active: boolean; color?: string; onClick: () => void; children: React.ReactNode }) {
+  const c = color ?? "var(--accent)";
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-all duration-150"
+      style={{
+        borderColor: active ? c : "var(--border)",
+        color: active ? c : "var(--text-dim)",
+        backgroundColor: active ? `${typeof c === "string" && c.startsWith("#") ? c + "14" : "var(--accent-soft)"}` : "transparent",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
-  const toggle = <K extends string>(set: Set<K>, id: K): Set<K> => {
+function planCountForNetwork(network: Network, allPlans: Plan[]): number {
+  return allPlans.filter((p) => carriers.find((c) => c.id === p.carrierId)?.network === network).length;
+}
+
+export default function Filters({ state, sort, autopay, onStateChange, onSortChange, onAutopayChange, allPlans }: Props) {
+  const { t } = useLang();
+
+  function toggleSet<K>(set: Set<K>, id: K): Set<K> {
     const next = new Set(set);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     return next;
-  };
+  }
 
   const carriersVisible = carriers.filter(
-    (c) => state.networks.size === 0 || state.networks.has(c.network),
+    (c) => (state.networks.size === 0 || state.networks.has(c.network)) && allPlans.some((p) => p.carrierId === c.id),
   );
 
-  const divider = <div className="h-px w-full" style={{ backgroundColor: "#1e3a5f" }} />;
+  const validityOpts: { key: ValidityCategory; label: string }[] = [
+    { key: "weekly", label: t.val_weekly },
+    { key: "monthly", label: t.val_monthly },
+    { key: "bimonthly", label: t.val_bimonthly },
+    { key: "semester", label: t.val_semester },
+    { key: "annual", label: t.val_annual },
+  ];
+
+  const dataOpts: { key: DataRange | "unlimited"; label: string }[] = [
+    { key: "0-2", label: "0–2 GB" },
+    { key: "2-5", label: "2–5 GB" },
+    { key: "5-10", label: "5–10 GB" },
+    { key: "10-25", label: "10–25 GB" },
+    { key: "25+", label: "25+ GB" },
+    { key: "unlimited", label: t.data_unlimited },
+  ];
 
   return (
     <div
-      className="rounded-2xl overflow-hidden border"
-      style={{ backgroundColor: "#0d1e35", borderColor: "#1e3a5f" }}
+      className="rounded-2xl border p-3 space-y-3"
+      style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
     >
-      {/* Budget row */}
-      <div className="px-6 pt-5 pb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-bold" style={{ color: "#e2e8f0" }}>Presupuesto Máximo</span>
+      {/* Top bar: sort dropdown + autopay + budget toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-dim)" }}>
+            {t.sortBy}
+          </label>
+          <div className="relative">
+            <select
+              value={sort}
+              onChange={(e) => onSortChange(e.target.value as SortKey)}
+              className="rounded-lg border pl-3 pr-8 py-1.5 text-sm font-semibold outline-none"
+              style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)", color: "var(--text)" }}
+            >
+              <option value="price_asc">{t.sort_price_asc}</option>
+              <option value="data_desc">{t.sort_data_desc}</option>
+              <option value="apps_desc">{t.sort_apps_desc}</option>
+              <option value="value">{t.sort_value}</option>
+            </select>
+            <ChevronDown size={15} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" style={{ color: "var(--text-dim)" }} />
+          </div>
+        </div>
+
+        <div className="ml-auto flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Zap size={14} style={{ color: autopay ? "var(--accent)" : "var(--text-dim)" }} />
+            <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>{t.autopay}</span>
+            <Toggle active={autopay} onToggle={() => onAutopayChange(!autopay)} />
+          </div>
+        </div>
+      </div>
+
+      {/* Budget */}
+      <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface-2)" }}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{t.budget}</span>
             {state.budgetActive && (
-              <span
-                className="rounded-md px-2 py-0.5 text-sm font-bold"
-                style={{ backgroundColor: "#0e2a4a", color: "#22d3ee" }}
-              >
-                ${state.maxPrice ?? 500} MXN
+              <span className="rounded-md px-2 py-0.5 text-xs font-bold" style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent)" }}>
+                ${state.maxPrice ?? 500}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs" style={{ color: "#64748b" }}>Activar</span>
-            <Toggle
-              active={state.budgetActive}
-              onToggle={() => onStateChange({ ...state, budgetActive: !state.budgetActive })}
-            />
-          </div>
+          <Toggle active={state.budgetActive} onToggle={() => onStateChange({ ...state, budgetActive: !state.budgetActive })} />
         </div>
         {state.budgetActive && (
-          <>
-            <input
-              type="range"
-              min={10}
-              max={2500}
-              step={10}
-              value={state.maxPrice ?? 500}
-              onChange={(e) => onStateChange({ ...state, maxPrice: Number(e.target.value) })}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-              style={{ accentColor: "#22d3ee" }}
-            />
-            <div className="flex justify-between mt-1 text-[11px]" style={{ color: "#475569" }}>
-              <span>$10</span>
-              <span>$2500+</span>
-            </div>
-          </>
+          <input
+            type="range"
+            min={10}
+            max={3000}
+            step={10}
+            value={state.maxPrice ?? 500}
+            onChange={(e) => onStateChange({ ...state, maxPrice: Number(e.target.value) })}
+            className="mt-3 w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{ accentColor: "var(--accent)" }}
+          />
         )}
       </div>
 
-      {divider}
-
-      {/* Plan type */}
-      <div className="px-6 py-4">
-        <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: "#64748b" }}>
-          Tipo de Plan
-        </p>
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-lg border px-4 py-1.5 text-sm font-semibold transition-colors"
-            style={{ borderColor: "#22d3ee", color: "#22d3ee", backgroundColor: "transparent" }}
-          >
-            Prepago
-          </button>
-          <button
-            className="rounded-lg border px-4 py-1.5 text-sm font-semibold cursor-not-allowed flex items-center gap-1.5"
-            style={{ borderColor: "#1e3a5f", color: "#475569", backgroundColor: "transparent" }}
-            disabled
-          >
-            Pospago
-            <span
-              className="rounded text-[9px] font-bold px-1.5 py-0.5 uppercase tracking-wide"
-              style={{ backgroundColor: "#1e3a5f", color: "#64748b" }}
-            >
-              Próximo
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {divider}
-
-      {/* Network chips */}
-      <div className="px-6 py-4">
-        <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: "#64748b" }}>
-          Red (Torres)
-        </p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {ALL_NETWORKS.map((n) => {
-            const active = state.networks.has(n);
-            const count = planCountForNetwork(n, allPlans);
-            const color = NETWORK_COLORS[n];
-            return (
-              <button
-                key={n}
-                onClick={() => onStateChange({ ...state, networks: toggle(state.networks, n) })}
-                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-semibold transition-all duration-150"
-                style={{
-                  borderColor: active ? color : "#1e3a5f",
-                  color: active ? color : "#475569",
-                  backgroundColor: "transparent",
-                }}
+      {/* Collapsible sections grid — keeps panel short */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {/* Operador */}
+        <Section icon={<Building2 size={13} />} title={t.operator} badge={state.carriers.size}>
+          <div className="flex flex-wrap gap-1.5">
+            {carriersVisible.map((c) => (
+              <Chip
+                key={c.id}
+                active={state.carriers.has(c.id)}
+                onClick={() => onStateChange({ ...state, carriers: toggleSet(state.carriers, c.id) })}
               >
-                {active && (
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-                {n}
-                <span
-                  className="rounded text-[10px] font-bold px-1 min-w-[18px] text-center"
-                  style={{ backgroundColor: active ? `${color}22` : "#0a1628", color: active ? color : "#475569" }}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {carriersVisible.length > 0 && (
-          <p className="text-[11px]" style={{ color: "#475569" }}>
-            {carriersVisible.map((c) => c.name).join(" · ")}
-          </p>
-        )}
+                {c.name}
+              </Chip>
+            ))}
+          </div>
+        </Section>
+
+        {/* Red (Torres) */}
+        <Section icon={<RadioTower size={13} />} title={t.network} badge={state.networks.size}>
+          <div className="flex flex-wrap gap-1.5">
+            {ALL_NETWORKS.map((n) => (
+              <Chip
+                key={n}
+                active={state.networks.has(n)}
+                color={NETWORK_COLORS[n]}
+                onClick={() => onStateChange({ ...state, networks: toggleSet(state.networks, n) })}
+              >
+                {n} <span style={{ opacity: 0.7 }}>· {planCountForNetwork(n, allPlans)}</span>
+              </Chip>
+            ))}
+          </div>
+        </Section>
+
+        {/* Vigencia */}
+        <Section icon={<CalendarRange size={13} />} title={t.validity} badge={state.validity.size}>
+          <div className="flex flex-wrap gap-1.5">
+            {validityOpts.map((v) => (
+              <Chip
+                key={v.key}
+                active={state.validity.has(v.key)}
+                onClick={() => onStateChange({ ...state, validity: toggleSet(state.validity, v.key) })}
+              >
+                {v.label}
+              </Chip>
+            ))}
+          </div>
+        </Section>
+
+        {/* Data range */}
+        <Section icon={<Database size={13} />} title={t.dataRange} badge={state.dataRanges.size}>
+          <div className="flex flex-wrap gap-1.5">
+            {dataOpts.map((d) => (
+              <Chip
+                key={d.key}
+                active={state.dataRanges.has(d.key)}
+                onClick={() => onStateChange({ ...state, dataRanges: toggleSet(state.dataRanges, d.key) })}
+              >
+                {d.label}
+              </Chip>
+            ))}
+          </div>
+        </Section>
       </div>
 
-      {divider}
-
-      {/* SIM type + Portabilidad */}
-      <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: "#64748b" }}>
-            Tipo de SIM
-          </p>
-          <div
-            className="inline-flex rounded-lg border overflow-hidden"
-            style={{ borderColor: "#1e3a5f" }}
-          >
+      {/* SIM + Acquisition row */}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: "var(--text-dim)" }}>{t.simType}</p>
+          <div className="inline-flex rounded-lg border overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {(["all", "esim", "physical"] as const).map((s) => {
               const active = state.simFilter === s;
-              const labels: Record<string, string> = { all: "Todas las SIMs", esim: "eSIM", physical: "SIM Física" };
-              const icons: Record<string, React.ReactNode> = {
-                all: <Smartphone size={13} />,
-                esim: <Wifi size={13} />,
-                physical: <CreditCard size={13} />,
-              };
+              const labels = { all: t.allSims, esim: t.esim, physical: t.physical };
+              const icons = { all: <Smartphone size={12} />, esim: <Wifi size={12} />, physical: <CreditCard size={12} /> };
               return (
                 <button
                   key={s}
                   onClick={() => onStateChange({ ...state, simFilter: s })}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors"
-                  style={
-                    active
-                      ? { backgroundColor: "#0a1628", color: "#e2e8f0", borderRight: "1px solid #1e3a5f" }
-                      : { backgroundColor: "transparent", color: "#475569", borderRight: "1px solid #1e3a5f" }
-                  }
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium"
+                  style={active
+                    ? { backgroundColor: "var(--accent-soft)", color: "var(--accent)" }
+                    : { backgroundColor: "transparent", color: "var(--text-dim)" }}
                 >
                   {icons[s]}
                   {labels[s]}
@@ -223,98 +300,45 @@ export default function Filters({ state, sort, onStateChange, onSortChange, allP
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="text-right">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <ArrowLeftRight size={13} style={{ color: "#22d3ee" }} />
-              <span className="text-sm font-bold" style={{ color: "#e2e8f0" }}>Portabilidad</span>
-            </div>
-            <p className="text-[11px]" style={{ color: "#475569" }}>Solo planes al traer tu número</p>
-          </div>
-          <Toggle
-            active={state.portabilidadOnly}
-            onToggle={() => onStateChange({ ...state, portabilidadOnly: !state.portabilidadOnly })}
-          />
-        </div>
-      </div>
-
-      {divider}
-
-      {/* Apps ilimitadas requeridas */}
-      <div className="px-6 py-4">
-        <div className="flex items-center justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: "#64748b" }}>
-            Apps Ilimitadas Requeridas
-            {state.requiredApps.size > 0 && (
-              <span
-                className="ml-2 rounded-full px-1.5 py-0.5 text-[10px]"
-                style={{ backgroundColor: "#22d3ee22", color: "#22d3ee" }}
-              >
-                {state.requiredApps.size}
-              </span>
-            )}
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1" style={{ color: "var(--text-dim)" }}>
+            <ArrowLeftRight size={11} /> {t.acquisition}
           </p>
-          <button
-            onClick={() => setAppsOpen(!appsOpen)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-cyan-400"
-          >
-            {appsOpen ? "Ocultar" : "Mostrar"}
-            {appsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
-        </div>
-        {appsOpen && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {ALL_APPS.map((a) => {
-              const active = state.requiredApps.has(a);
+          <div className="inline-flex rounded-lg border overflow-hidden" style={{ borderColor: "var(--border)" }}>
+            {(["all", "recarga", "portabilidad"] as const).map((s) => {
+              const active = state.acquisition === s;
+              const labels = { all: t.acq_any, recarga: t.acq_recarga, portabilidad: t.acq_porta };
               return (
                 <button
-                  key={a}
-                  onClick={() => onStateChange({ ...state, requiredApps: toggle(state.requiredApps, a) })}
-                  className="rounded-full border px-2.5 py-1 text-xs font-medium transition-all duration-150"
-                  style={{
-                    borderColor: active ? "#22d3ee" : "#1e3a5f",
-                    color: active ? "#22d3ee" : "#475569",
-                    backgroundColor: active ? "#22d3ee11" : "transparent",
-                  }}
+                  key={s}
+                  onClick={() => onStateChange({ ...state, acquisition: s })}
+                  className="px-2.5 py-1.5 text-xs font-medium"
+                  style={active
+                    ? { backgroundColor: "var(--accent-soft)", color: "var(--accent)" }
+                    : { backgroundColor: "transparent", color: "var(--text-dim)" }}
                 >
-                  {a}
+                  {labels[s]}
                 </button>
               );
             })}
           </div>
-        )}
+        </div>
       </div>
 
-      {divider}
-
-      {/* Sort bar */}
-      <div
-        className="grid grid-cols-3 text-sm font-semibold"
-        style={{ backgroundColor: "#0a1628" }}
-      >
-        {(["price_asc", "data_desc", "apps_desc"] as SortKey[]).map((s) => {
-          const labels: Record<SortKey, string> = {
-            price_asc: "Menor Precio",
-            data_desc: "Más Datos",
-            apps_desc: "Más Apps",
-          };
-          const active = sort === s;
-          return (
-            <button
-              key={s}
-              onClick={() => onSortChange(s)}
-              className="py-3.5 text-center transition-colors"
-              style={
-                active
-                  ? { backgroundColor: "#0d1e35", color: "#e2e8f0", borderTop: "2px solid #22d3ee" }
-                  : { color: "#475569", borderTop: "2px solid transparent" }
-              }
+      {/* Required apps */}
+      <Section icon={<Smartphone size={13} />} title={t.requiredApps} badge={state.requiredApps.size}>
+        <div className="flex flex-wrap gap-1.5">
+          {ALL_APPS.map((a) => (
+            <Chip
+              key={a}
+              active={state.requiredApps.has(a)}
+              onClick={() => onStateChange({ ...state, requiredApps: toggleSet(state.requiredApps, a) })}
             >
-              {labels[s]}
-            </button>
-          );
-        })}
-      </div>
+              {a}
+            </Chip>
+          ))}
+        </div>
+      </Section>
     </div>
   );
 }

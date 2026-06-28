@@ -1,3 +1,50 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ───────────────────────────────────────────────
+   Theme tokens — dark (default) keeps the blue
+   undertone; light stays readable with blue tints.
+   ─────────────────────────────────────────────── */
+:root {
+  --bg: #0a1628;
+  --surface: #0d1e35;
+  --surface-2: #081325;
+  --surface-3: #0e2a4a;
+  --border: #1e3a5f;
+  --border-soft: #16304f;
+  --text: #eaf1fb;
+  --text-muted: #b6c6dc;
+  --text-dim: #7f93ac;
+  --accent: #22d3ee;
+  --accent-soft: #0e2a4a;
+}
+
+html.light {
+  --bg: #eaf1f9;
+  --surface: #ffffff;
+  --surface-2: #f2f7fd;
+  --surface-3: #e2edfa;
+  --border: #cddbed;
+  --border-soft: #dde8f5;
+  --text: #0d2647;
+  --text-muted: #3c577a;
+  --text-dim: #64789a;
+  --accent: #0e7490;
+  --accent-soft: #def3f7;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
